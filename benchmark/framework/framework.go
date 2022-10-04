@@ -54,6 +54,7 @@ func (frame *BenchmarkFramework) Run() {
 	flag.Parse()
 	for i := 0; i < len(frame.Drivers); i++ {
 		testDriver := &frame.Drivers[i]
+		fmt.Printf("Running tests for %s\n", testDriver.TestName)
 		for j := 0; j < testDriver.NumberOfTests; j++ {
 			res := testing.Benchmark(testDriver.TestFunction)
 			testDriver.TestTimes = append(testDriver.TestTimes, res.T.Seconds())

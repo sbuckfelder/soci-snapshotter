@@ -17,40 +17,41 @@
 package main
 
 import (
-	"math/rand"
+	"fmt"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/awslabs/soci-snapshotter/benchmark/framework"
 )
 
 var (
-	benchmarkOutput = "output.json"
+	benchmarkOutput   = "./output.json"
+	containerdAddress = "/tmp/containerd-grpc/containerd.sock"
+	containerdRoot    = "/tmp/lib/containerd"
+	containerdState   = "/tmp/containerd"
+	containerdConfig  = "./containerd-config.toml"
+	containerdOutput  = "./containerd-out"
+	ecrImage          = "761263122156.dkr.starport.us-west-2.amazonaws.com/tensortest:hello-world"
+	// dockerImage = "docker.io/library/python:3"
+	// dockerImage = "docker.io/tensorflow/tensorflow:latest"
+	dockerImage     = "docker.io/library/hello-world:latest"
+	platform        = "linux/amd64"
+	awsSecretFile   = "./aws_secret"
+	sociBinary      = "../out/soci-snapshotter-grpc"
+	sociAddress     = "/tmp/soci-snapshotter-grpc/soci-snapshotter-grpc.sock"
+	sociRoot        = "/tmp/lib/soci-snapshotter-grpc"
+	sociOutput      = "./soci-snapshotter-grpc-out"
+	sociIndexDigest = "sha256:6b4dfbf07ffb0e1349f733eb610c9768f20a2472312509a2d003aa21abbdfc2d"
 )
 
 func main() {
 	commit := os.Args[1]
 	var drivers []framework.BenchmarkTestDriver
 	drivers = append(drivers, framework.BenchmarkTestDriver{
-		TestName:      "TwoSecondSleep",
+		TestName:      "SociRPullTensorHelloWorld",
 		NumberOfTests: 10,
 		TestFunction: func(b *testing.B) {
-			BenchmarkExample(b, false, 2)
-		},
-	})
-	drivers = append(drivers, framework.BenchmarkTestDriver{
-		TestName:      "TwoSecondRandSleep",
-		NumberOfTests: 10,
-		TestFunction: func(b *testing.B) {
-			BenchmarkExample(b, true, 2)
-		},
-	})
-	drivers = append(drivers, framework.BenchmarkTestDriver{
-		TestName:      "ThreeSecondSleep",
-		NumberOfTests: 10,
-		TestFunction: func(b *testing.B) {
-			BenchmarkExample(b, false, 3)
+			BenchmarkSociRPullPullImage(b, ecrImage, sociIndexDigest)
 		},
 	})
 
@@ -62,11 +63,83 @@ func main() {
 	benchmarks.Run()
 }
 
-func BenchmarkExample(b *testing.B, isRand bool, baseSeconds int64) {
-	sleepTime := time.Duration(baseSeconds)
-	if isRand {
-		rand.Seed(time.Now().UnixNano())
-		sleepTime = time.Duration(rand.Int63n(baseSeconds))
+func BenchmarkPullImage(b *testing.B, imageRef string) {
+	containerdProcess, err := framework.StartContainerd(
+		b,
+		containerdAddress,
+		containerdRoot,
+		containerdState,
+		containerdConfig,
+		containerdOutput)
+	if err != nil {
+		b.Fatal(err)
 	}
-	time.Sleep(sleepTime * time.Second)
+	defer containerdProcess.StopProcess()
+	b.ResetTimer()
+	_, err = containerdProcess.PullImageFromECR(imageRef, platform, awsSecretFile)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.StopTimer()
+}
+
+func BenchmarkRunContainer(b *testing.B, imageRef string) {
+	containerdProcess, err := framework.StartContainerd(
+		b,
+		containerdAddress,
+		containerdRoot,
+		containerdState,
+		containerdConfig,
+		containerdOutput)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer containerdProcess.StopProcess()
+	image, err := containerdProcess.PullImageFromECR(imageRef, platform, awsSecretFile)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	err = containerdProcess.RunContainer(image)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.StopTimer()
+}
+
+func BenchmarkSociRPullPullImage(
+	b *testing.B,
+	imageRef string,
+	indexDigest string) {
+	containerdProcess, err := framework.StartContainerd(
+		b,
+		containerdAddress,
+		containerdRoot,
+		containerdState,
+		containerdConfig,
+		containerdOutput)
+	if err != nil {
+                fmt.Printf("Failed to create containerd proc: %v\n", err)
+		b.Fatal(err)
+	}
+	defer containerdProcess.StopProcess()
+	sociProcess, err := StartSoci(
+		sociBinary,
+		sociAddress,
+		sociRoot,
+		containerdAddress,
+		sociOutput)
+	if err != nil {
+                fmt.Printf("Failed to create soci proc: %v\n", err)
+		b.Fatal(err)
+	}
+	defer sociProcess.StopProcess()
+	b.ResetTimer()
+	sociContainerdProc := SociContainerdProcess{containerdProcess}
+	_, err = sociContainerdProc.SociRPullImageFromECR(imageRef, indexDigest, awsSecretFile)
+	if err != nil {
+		fmt.Println(err)
+		b.Fatal(err)
+	}
+	b.StopTimer()
 }

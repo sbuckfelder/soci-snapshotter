@@ -85,11 +85,12 @@ const (
 )
 
 var (
-	address      = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
-	configPath   = flag.String("config", defaultConfigPath, "path to the configuration file")
-	logLevel     = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
-	rootDir      = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
-	printVersion = flag.Bool("version", false, "print the version")
+	address             = flag.String("address", defaultAddress, "address for the snapshotter's GRPC server")
+	configPath          = flag.String("config", defaultConfigPath, "path to the configuration file")
+	logLevel            = flag.String("log-level", defaultLogLevel.String(), "set the logging level [trace, debug, info, warn, error, fatal, panic]")
+	rootDir             = flag.String("root", defaultRootDir, "path to the root directory for this snapshotter")
+	imageServiceAddress = flag.String("image-service-address", defaultImageServiceAddress, "address for the containerd server")
+	printVersion        = flag.Bool("version", false, "print the version")
 )
 
 type snapshotterConfig struct {
@@ -160,7 +161,7 @@ func main() {
 	}
 	if config.Config.CRIKeychainConfig.EnableKeychain {
 		// connects to the backend CRI service (defaults to containerd socket)
-		criAddr := defaultImageServiceAddress
+		criAddr := *imageServiceAddress
 		if cp := config.CRIKeychainConfig.ImageServicePath; cp != "" {
 			criAddr = cp
 		}

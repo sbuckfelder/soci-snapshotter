@@ -20,14 +20,20 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+        "io/fs"
 	"os"
 	"testing"
 
 	"github.com/montanaflynn/stats"
 )
 
+var (
+    resultFilename = "results.json"
+    resultFilePerm fs.FileMode = 0644
+)
+
 type BenchmarkFramework struct {
-	OutputFile string                `json:"-"`
+	OutputDir string                `json:"-"`
 	CommitID   string                `json:"commit"`
 	Drivers    []BenchmarkTestDriver `json:"benchmarkTests"`
 }
@@ -66,7 +72,12 @@ func (frame *BenchmarkFramework) Run() {
 	if err != nil {
 		fmt.Printf("JSON Marshalling Error: %v\n", err)
 	}
-	err = os.WriteFile(frame.OutputFile, json, 0644)
+        err = os.MkdirAll(frame.OutputDir, resultFilePerm)
+	if err != nil {
+		fmt.Printf("Failed to Create Output Dir: %v\n", err)
+	}
+	resultFileLoc := frame.OutputDir + "/" + resultFilename
+	err = os.WriteFile(resultFileLoc, json, resultFilePerm)
 	if err != nil {
 		fmt.Printf("WriteFile Error: %v\n", err)
 	}

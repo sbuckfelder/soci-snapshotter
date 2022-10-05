@@ -17,6 +17,7 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"os"
 	"testing"
@@ -25,121 +26,82 @@ import (
 )
 
 var (
-	benchmarkOutput   = "./output.json"
+        outputDir = "./output"
 	containerdAddress = "/tmp/containerd-grpc/containerd.sock"
 	containerdRoot    = "/tmp/lib/containerd"
 	containerdState   = "/tmp/containerd"
 	containerdConfig  = "./containerd-config.toml"
-	containerdOutput  = "./containerd-out"
-	ecrImage          = "761263122156.dkr.starport.us-west-2.amazonaws.com/tensortest:hello-world"
-	// dockerImage = "docker.io/library/python:3"
-	// dockerImage = "docker.io/tensorflow/tensorflow:latest"
-	dockerImage     = "docker.io/library/hello-world:latest"
-	platform        = "linux/amd64"
-	awsSecretFile   = "./aws_secret"
-	sociBinary      = "../out/soci-snapshotter-grpc"
-	sociAddress     = "/tmp/soci-snapshotter-grpc/soci-snapshotter-grpc.sock"
-	sociRoot        = "/tmp/lib/soci-snapshotter-grpc"
-	sociOutput      = "./soci-snapshotter-grpc-out"
-	sociIndexDigest = "sha256:6b4dfbf07ffb0e1349f733eb610c9768f20a2472312509a2d003aa21abbdfc2d"
+	platform          = "linux/amd64"
+        sociBinary = "../out/soci-snapshotter-grpc"
+        sociAddress = "/tmp/soci-snapshotter-grpc/soci-snapshotter-grpc.sock"
+        sociRoot = "/tmp/lib/soci-snapshotter-grpc"
+        awsSecretFile = "./aws_secret"
 )
+
+type ImageDescriptor struct {
+	shortName string
+	imageRef  string
+        sociIndexManifestRef string
+}
 
 func main() {
 	commit := os.Args[1]
+	configCsv := os.Args[2]
+	imageList, err := getImageListFromCsv(configCsv)
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to read csv file %s with error:%v\n", configCsv, err)
+		panic(errMsg)
+	}
 	var drivers []framework.BenchmarkTestDriver
-	drivers = append(drivers, framework.BenchmarkTestDriver{
-		TestName:      "SociRPullTensorHelloWorld",
-		NumberOfTests: 10,
-		TestFunction: func(b *testing.B) {
-			BenchmarkSociRPullPullImage(b, ecrImage, sociIndexDigest)
-		},
-	})
+	for _, image := range imageList {
+		drivers = append(drivers, framework.BenchmarkTestDriver{
+			TestName:      "OverlayFSPull" + image.shortName,
+			NumberOfTests: 5,
+			TestFunction: func(b *testing.B) {
+				BenchmarkPullImageFromECR(b, image.imageRef)
+			},
+		})
+/*
+		drivers = append(drivers, framework.BenchmarkTestDriver{
+			TestName:      "OverlayFSRun" + image.shortName,
+			NumberOfTests: 10,
+			TestFunction: func(b *testing.B) {
+				BenchmarkRunContainerFromECR(b, image.imageRef)
+			},
+		})
+		drivers = append(drivers, framework.BenchmarkTestDriver{
+			TestName:      "SociRPull" + image.shortName,
+			NumberOfTests: 10,
+			TestFunction: func(b *testing.B) {
+				BenchmarkSociRPullPullImage(b, image.imageRef, image.sociIndexManifestRef)
+			},
+		})
+*/
+	}
 
 	benchmarks := framework.BenchmarkFramework{
-		OutputFile: benchmarkOutput,
+		OutputDir: outputDir,
 		CommitID:   commit,
 		Drivers:    drivers,
 	}
 	benchmarks.Run()
 }
 
-func BenchmarkPullImage(b *testing.B, imageRef string) {
-	containerdProcess, err := framework.StartContainerd(
-		b,
-		containerdAddress,
-		containerdRoot,
-		containerdState,
-		containerdConfig,
-		containerdOutput)
+func getImageListFromCsv(csvLoc string) ([]ImageDescriptor, error) {
+	csvFile, err := os.Open(csvLoc)
 	if err != nil {
-		b.Fatal(err)
+		return nil, err
 	}
-	defer containerdProcess.StopProcess()
-	b.ResetTimer()
-	_, err = containerdProcess.PullImageFromECR(imageRef, platform, awsSecretFile)
+	csv, err := csv.NewReader(csvFile).ReadAll()
 	if err != nil {
-		b.Fatal(err)
+		return nil, err
 	}
-	b.StopTimer()
-}
-
-func BenchmarkRunContainer(b *testing.B, imageRef string) {
-	containerdProcess, err := framework.StartContainerd(
-		b,
-		containerdAddress,
-		containerdRoot,
-		containerdState,
-		containerdConfig,
-		containerdOutput)
-	if err != nil {
-		b.Fatal(err)
+	var images []ImageDescriptor
+	for _, image := range csv {
+		images = append(images, ImageDescriptor{
+			shortName: image[0],
+			imageRef:  image[1],
+			sociIndexManifestRef: image[2]})
 	}
-	defer containerdProcess.StopProcess()
-	image, err := containerdProcess.PullImageFromECR(imageRef, platform, awsSecretFile)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.ResetTimer()
-	err = containerdProcess.RunContainer(image)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.StopTimer()
-}
-
-func BenchmarkSociRPullPullImage(
-	b *testing.B,
-	imageRef string,
-	indexDigest string) {
-	containerdProcess, err := framework.StartContainerd(
-		b,
-		containerdAddress,
-		containerdRoot,
-		containerdState,
-		containerdConfig,
-		containerdOutput)
-	if err != nil {
-                fmt.Printf("Failed to create containerd proc: %v\n", err)
-		b.Fatal(err)
-	}
-	defer containerdProcess.StopProcess()
-	sociProcess, err := StartSoci(
-		sociBinary,
-		sociAddress,
-		sociRoot,
-		containerdAddress,
-		sociOutput)
-	if err != nil {
-                fmt.Printf("Failed to create soci proc: %v\n", err)
-		b.Fatal(err)
-	}
-	defer sociProcess.StopProcess()
-	b.ResetTimer()
-	sociContainerdProc := SociContainerdProcess{containerdProcess}
-	_, err = sociContainerdProc.SociRPullImageFromECR(imageRef, indexDigest, awsSecretFile)
-	if err != nil {
-		fmt.Println(err)
-		b.Fatal(err)
-	}
-	b.StopTimer()
+	return images, nil
 }

@@ -130,11 +130,4 @@ integration:
 
 benchmarks:
 	@echo "$@"
-	@cd benchmark/ ; GO111MODULE=$(GO111MODULE_VALUE) go build -o bin/benchmarkTests .  && sudo ./bin/benchmarkTests $(COMMIT)
-
-# need to be logged into AWS to run
-get-ecr:
-	@echo "$@"
-	aws ecr get-login-password --endpoint https://api.starport.us-west-2.amazonaws.com --region us-west-2 > benchmark/aws_secret
-	cat benchmark/aws_secret | sudo docker login -u AWS --password-stdin 761263122156.dkr.starport.us-west-2.amazonaws.com
-
+	@cd benchmark/ ; GO111MODULE=$(GO111MODULE_VALUE) go build -o bin/benchmarkTests . && sudo ./bin/benchmarkTests $(COMMIT) imagesToRun.csv

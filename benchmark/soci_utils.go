@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+        "io/fs"
 	"os"
 	"os/exec"
 	"time"
@@ -31,6 +32,10 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
+var (
+    outputFilePerm fs.FileMode = 0644
+)
+
 type SociContainerdProcess struct {
 	*framework.ContainerdProcess
 }
@@ -39,7 +44,8 @@ type SociProcess struct {
 	command *exec.Cmd
 	address string
 	root    string
-	output  *os.File
+	stdout  *os.File
+	stderr  *os.File
 }
 
 func StartSoci(
@@ -52,35 +58,48 @@ func StartSoci(
 		"-address", sociAddress,
 		"-image-service-address", containerdAddress,
 		"-root", sociRoot)
-	outfile, err := os.Create(sociOutput)
+        err := os.MkdirAll(sociOutput, outputFilePerm)
 	if err != nil {
-                fmt.Println(err)
-		panic(err)
+		return nil, err
 	}
-	sociCmd.Stdout = outfile
-	sociCmd.Stderr = outfile
+	stdoutFile, err := os.Create(sociOutput + "soci-snapshotter-stdout")
+	if err != nil {
+		return nil, err
+	}
+	sociCmd.Stdout = stdoutFile
+	stderrFile, err := os.Create(sociOutput + "soci-snapshotter-stderr")
+	if err != nil {
+		return nil, err
+	}
+	sociCmd.Stderr = stderrFile 
 	err = sociCmd.Start()
 	if err != nil {
                 fmt.Println(err)
 		return nil, err
 	}
-	time.Sleep(3 * time.Second)
+	time.Sleep(4 * time.Second)
 	return &SociProcess{
 		command: sociCmd,
 		address: sociAddress,
 		root:    sociRoot,
-		output:  outfile}, nil
+                stdout: stdoutFile,
+                stderr: stderrFile}, nil
 }
 
 func (proc *SociProcess) StopProcess() {
-	if proc.output != nil {
-		proc.output.Close()
+	if proc.stdout != nil {
+		proc.stdout.Close()
+	}
+	if proc.stderr != nil {
+		proc.stderr.Close()
 	}
 	if proc.command != nil {
 		proc.command.Process.Kill()
 	}
-	os.RemoveAll(proc.root)
-	os.RemoveAll(proc.address)
+        err := os.RemoveAll(proc.address)
+        if err != nil {
+            fmt.Println(err)
+        }
 }
 
 func (proc *SociContainerdProcess) SociRPullImageFromECR(

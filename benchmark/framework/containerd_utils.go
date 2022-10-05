@@ -18,6 +18,7 @@ package framework
 
 import (
 	"context"
+        "io/fs"
 	"os"
 	"os/exec"
 	"testing"
@@ -27,13 +28,13 @@ import (
 	"github.com/containerd/containerd/log/logtest"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/oci"
-	"github.com/containerd/containerd/remotes"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/containerd/remotes/docker/config"
 )
 
 var (
 	testNamespace = "BENCHMARK_TESTING"
+        testContainerId = "TEST_RUN_CONTAINER"
+        testEnvironment = "TEST_RUNTIME"
+        outputFilePerm fs.FileMode = 0644
 )
 
 type ContainerdProcess struct {
@@ -41,7 +42,8 @@ type ContainerdProcess struct {
 	address       string
 	root          string
 	state         string
-	output        *os.File
+	stdout        *os.File
+	stderr        *os.File
 	Client        *containerd.Client
 	Context       context.Context
 	cancelContext context.CancelFunc
@@ -59,12 +61,20 @@ func StartContainerd(
 		"--root", containerdRoot,
 		"--state", containerdState,
 		"-c", containerdConfig)
-	outfile, err := os.Create(containerdOutput)
+        err := os.MkdirAll(containerdOutput, outputFilePerm)
 	if err != nil {
 		return nil, err
 	}
-	containerdCmd.Stdout = outfile
-	containerdCmd.Stderr = outfile
+	stdoutFile, err := os.Create(containerdOutput + "/containerd-stdout")
+	if err != nil {
+		return nil, err
+	}
+	containerdCmd.Stdout = stdoutFile 
+	stderrFile, err := os.Create(containerdOutput + "/containerd-stderr")
+	if err != nil {
+		return nil, err
+	}
+	containerdCmd.Stderr = stderrFile
 	err = containerdCmd.Start()
 	if err != nil {
 		return nil, err
@@ -79,7 +89,8 @@ func StartContainerd(
 		command:       containerdCmd,
 		address:       containerdAddress,
 		root:          containerdRoot,
-		output:        outfile,
+		stdout:        stdoutFile,
+		stderr:        stderrFile,
 		state:         containerdState,
 		Client:        client,
 		Context:       ctx,
@@ -90,8 +101,11 @@ func (proc *ContainerdProcess) StopProcess() {
 	if proc.Client != nil {
 		proc.Client.Close()
 	}
-	if proc.output != nil {
-		proc.output.Close()
+	if proc.stdout != nil {
+		proc.stdout.Close()
+	}
+	if proc.stderr != nil {
+		proc.stderr.Close()
 	}
 	if proc.cancelContext != nil {
 		proc.cancelContext()
@@ -114,25 +128,12 @@ func (proc *ContainerdProcess) PullImage(
 	return image, nil
 }
 
-func (proc *ContainerdProcess) PullImageFromECR(
-	imageRef string,
-	platform string,
-	awsSecretFile string) (containerd.Image, error) {
-	opts := GetRemoteOpts(proc.Context, platform)
-	opts = append(opts, containerd.WithResolver(GetECRResolver(proc.Context, awsSecretFile)))
-	image, pullErr := proc.Client.Pull(proc.Context, imageRef, opts...)
-	if pullErr != nil {
-		return nil, pullErr
-	}
-	return image, nil
-}
 
 func (proc *ContainerdProcess) RunContainer(image containerd.Image) error {
-	id := "TEST_RUN_CONTAINER"
 	container, err := proc.Client.NewContainer(
 		proc.Context,
-		id,
-		containerd.WithNewSnapshot(id, image),
+		testContainerId,
+		containerd.WithNewSnapshot(testContainerId, image),
 		containerd.WithNewSpec(oci.WithImageConfig(image)))
 	if err != nil {
 		return err
@@ -169,26 +170,6 @@ func GetRemoteOpts(ctx context.Context, platform string) []containerd.RemoteOpt 
 	return opts
 }
 
-func GetECRResolver(ctx context.Context, awsSecretFile string) remotes.Resolver {
-	username := "AWS"
-	secretByteArray, err := os.ReadFile(awsSecretFile)
-	secret := string(secretByteArray)
-	if err != nil {
-		panic("Cannot read aws ecr login password")
-	}
-	hostOptions := config.HostOptions{}
-	hostOptions.Credentials = func(host string) (string, string, error) {
-		return username, secret, nil
-	}
-	var PushTracker = docker.NewInMemoryTracker()
-	options := docker.ResolverOptions{
-		Tracker: PushTracker,
-	}
-	options.Hosts = config.ConfigureHosts(ctx, hostOptions)
-
-	return docker.NewResolver(options)
-}
-
 func testContext(t testing.TB) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = namespaces.WithNamespace(ctx, testNamespace)
@@ -200,7 +181,7 @@ func testContext(t testing.TB) (context.Context, context.CancelFunc) {
 
 func newClient(address string) (*containerd.Client, error) {
 	opts := []containerd.ClientOpt{}
-	if rt := os.Getenv("TEST_RUNTIME"); rt != "" {
+	if rt := os.Getenv(testEnvironment); rt != "" {
 		opts = append(opts, containerd.WithDefaultRuntime(rt))
 	}
 

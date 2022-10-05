@@ -17,40 +17,38 @@
 package main
 
 import (
-	"math/rand"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/awslabs/soci-snapshotter/benchmark/framework"
 )
 
 var (
-	benchmarkOutput = "output.json"
+	benchmarkOutput   = "./output.json"
+	containerdAddress = "/tmp/containerd-grpc/containerd.sock"
+	containerdRoot    = "/tmp/lib/containerd"
+	containerdState   = "/tmp/containerd"
+	containerdConfig  = "./containerd-config.toml"
+	containerdOutput  = "./containerd-out"
+	dockerImage       = "docker.io/library/hello-world:latest"
+	platform          = "linux/amd64"
 )
 
 func main() {
 	commit := os.Args[1]
 	var drivers []framework.BenchmarkTestDriver
 	drivers = append(drivers, framework.BenchmarkTestDriver{
-		TestName:      "TwoSecondSleep",
+		TestName:      "DockerPullImage",
 		NumberOfTests: 10,
 		TestFunction: func(b *testing.B) {
-			BenchmarkExample(b, false, 2)
+			BenchmarkPullImage(b, dockerImage)
 		},
 	})
 	drivers = append(drivers, framework.BenchmarkTestDriver{
-		TestName:      "TwoSecondRandSleep",
+		TestName:      "DockerRunContainer",
 		NumberOfTests: 10,
 		TestFunction: func(b *testing.B) {
-			BenchmarkExample(b, true, 2)
-		},
-	})
-	drivers = append(drivers, framework.BenchmarkTestDriver{
-		TestName:      "ThreeSecondSleep",
-		NumberOfTests: 10,
-		TestFunction: func(b *testing.B) {
-			BenchmarkExample(b, false, 3)
+			BenchmarkRunContainer(b, dockerImage)
 		},
 	})
 
@@ -62,11 +60,46 @@ func main() {
 	benchmarks.Run()
 }
 
-func BenchmarkExample(b *testing.B, isRand bool, baseSeconds int64) {
-	sleepTime := time.Duration(baseSeconds)
-	if isRand {
-		rand.Seed(time.Now().UnixNano())
-		sleepTime = time.Duration(rand.Int63n(baseSeconds))
+func BenchmarkPullImage(b *testing.B, imageRef string) {
+	containerdProcess, err := framework.StartContainerd(
+		b,
+		containerdAddress,
+		containerdRoot,
+		containerdState,
+		containerdConfig,
+		containerdOutput)
+	if err != nil {
+		b.Fatal(err)
 	}
-	time.Sleep(sleepTime * time.Second)
+	defer containerdProcess.StopProcess()
+	b.ResetTimer()
+	_, err = containerdProcess.PullImage(imageRef, platform)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.StopTimer()
+}
+
+func BenchmarkRunContainer(b *testing.B, imageRef string) {
+	containerdProcess, err := framework.StartContainerd(
+		b,
+		containerdAddress,
+		containerdRoot,
+		containerdState,
+		containerdConfig,
+		containerdOutput)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer containerdProcess.StopProcess()
+	image, err := containerdProcess.PullImage(imageRef, platform)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	err = containerdProcess.RunContainer(image)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.StopTimer()
 }

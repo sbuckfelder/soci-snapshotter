@@ -3,3 +3,4 @@
 .vscode/
 /benchmark/bin
 /benchmark/output.json
+/benchmark/containerd-out

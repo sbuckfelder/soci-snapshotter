@@ -130,4 +130,4 @@ integration:
 
 benchmarks:
 	@echo "$@"
-	@cd benchmark/ ; GO111MODULE=$(GO111MODULE_VALUE) go build -o bin/benchmarkTests main.go && sudo ./bin/benchmarkTests $(COMMIT)
+	@cd benchmark/ ; GO111MODULE=$(GO111MODULE_VALUE) go build -o bin/benchmarkTests . && sudo ./bin/benchmarkTests $(COMMIT) imagesToRun.csv

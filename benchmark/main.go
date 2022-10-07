@@ -17,6 +17,8 @@
 package main
 
 import (
+	"encoding/csv"
+	"fmt"
 	"os"
 	"testing"
 
@@ -30,27 +32,40 @@ var (
 	containerdState   = "/tmp/containerd"
 	containerdConfig  = "./containerd-config.toml"
 	containerdOutput  = "./containerd-out"
-	dockerImage       = "docker.io/library/hello-world:latest"
 	platform          = "linux/amd64"
 )
 
+type ImageDescriptor struct {
+	shortName string
+	imageRef  string
+}
+
 func main() {
 	commit := os.Args[1]
+	configCsv := os.Args[2]
+	imageList, err := getImageListFromCsv(configCsv)
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to read csv file %s with error:%v\n", configCsv, err)
+		panic(errMsg)
+	}
 	var drivers []framework.BenchmarkTestDriver
-	drivers = append(drivers, framework.BenchmarkTestDriver{
-		TestName:      "DockerPullImage",
-		NumberOfTests: 10,
-		TestFunction: func(b *testing.B) {
-			BenchmarkPullImage(b, dockerImage)
-		},
-	})
-	drivers = append(drivers, framework.BenchmarkTestDriver{
-		TestName:      "DockerRunContainer",
-		NumberOfTests: 10,
-		TestFunction: func(b *testing.B) {
-			BenchmarkRunContainer(b, dockerImage)
-		},
-	})
+	for _, image := range imageList {
+
+		drivers = append(drivers, framework.BenchmarkTestDriver{
+			TestName:      "OverlayFSPull" + image.shortName,
+			NumberOfTests: 10,
+			TestFunction: func(b *testing.B) {
+				BenchmarkPullImage(b, image.imageRef)
+			},
+		})
+		drivers = append(drivers, framework.BenchmarkTestDriver{
+			TestName:      "OverlayFSRun" + image.shortName,
+			NumberOfTests: 10,
+			TestFunction: func(b *testing.B) {
+				BenchmarkRunContainer(b, image.imageRef)
+			},
+		})
+	}
 
 	benchmarks := framework.BenchmarkFramework{
 		OutputFile: benchmarkOutput,
@@ -60,46 +75,20 @@ func main() {
 	benchmarks.Run()
 }
 
-func BenchmarkPullImage(b *testing.B, imageRef string) {
-	containerdProcess, err := framework.StartContainerd(
-		b,
-		containerdAddress,
-		containerdRoot,
-		containerdState,
-		containerdConfig,
-		containerdOutput)
+func getImageListFromCsv(csvLoc string) ([]ImageDescriptor, error) {
+	csvFile, err := os.Open(csvLoc)
 	if err != nil {
-		b.Fatal(err)
+		return nil, err
 	}
-	defer containerdProcess.StopProcess()
-	b.ResetTimer()
-	_, err = containerdProcess.PullImage(imageRef, platform)
+	csv, err := csv.NewReader(csvFile).ReadAll()
 	if err != nil {
-		b.Fatal(err)
+		return nil, err
 	}
-	b.StopTimer()
-}
-
-func BenchmarkRunContainer(b *testing.B, imageRef string) {
-	containerdProcess, err := framework.StartContainerd(
-		b,
-		containerdAddress,
-		containerdRoot,
-		containerdState,
-		containerdConfig,
-		containerdOutput)
-	if err != nil {
-		b.Fatal(err)
+	var images []ImageDescriptor
+	for _, image := range csv {
+		images = append(images, ImageDescriptor{
+			shortName: image[0],
+			imageRef:  image[1]})
 	}
-	defer containerdProcess.StopProcess()
-	image, err := containerdProcess.PullImage(imageRef, platform)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.ResetTimer()
-	err = containerdProcess.RunContainer(image)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.StopTimer()
+	return images, nil
 }

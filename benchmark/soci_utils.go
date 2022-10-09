@@ -17,7 +17,7 @@
 package main
 
 import (
-	"context"
+        "errors"
 	"fmt"
         "io/fs"
 	"os"
@@ -27,13 +27,13 @@ import (
 	"github.com/awslabs/soci-snapshotter/benchmark/framework"
 	"github.com/awslabs/soci-snapshotter/fs/source"
 	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/cmd/ctr/commands"
-	"github.com/containerd/containerd/images"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+        "github.com/containerd/containerd/cio"
+        "github.com/containerd/containerd/oci"
 )
 
 var (
     outputFilePerm fs.FileMode = 0644
+    sociContainerId = "TEST_SOCI_CONTAINER"
 )
 
 type SociContainerdProcess struct {
@@ -53,31 +53,47 @@ func StartSoci(
 	sociAddress string,
 	sociRoot string,
 	containerdAddress string,
-	sociOutput string) (*SociProcess, error) {
+        configFile string,
+	outputDir string) (*SociProcess, error) {
 	sociCmd := exec.Command(sociBinary,
 		"-address", sociAddress,
-		"-image-service-address", containerdAddress,
+		"-config", configFile,
 		"-root", sociRoot)
-        err := os.MkdirAll(sociOutput, outputFilePerm)
+        err := os.MkdirAll(outputDir, outputFilePerm)
 	if err != nil {
 		return nil, err
 	}
-	stdoutFile, err := os.Create(sociOutput + "soci-snapshotter-stdout")
+	stdoutFile, err := os.Create(outputDir + "/soci-snapshotter-stdout")
 	if err != nil {
 		return nil, err
 	}
 	sociCmd.Stdout = stdoutFile
-	stderrFile, err := os.Create(sociOutput + "soci-snapshotter-stderr")
+	stderrFile, err := os.Create(outputDir + "/soci-snapshotter-stderr")
 	if err != nil {
 		return nil, err
 	}
 	sociCmd.Stderr = stderrFile 
 	err = sociCmd.Start()
 	if err != nil {
-                fmt.Println(err)
+                fmt.Printf("Soci Failed to Start %v\n", err)
 		return nil, err
 	}
-	time.Sleep(4 * time.Second)
+        
+        // The soci-snapshotter-grpc is not ready to be used until the
+        // unix socket file is created
+        sleepCount := 0
+        loopExit := false
+        for loopExit == false {
+            time.Sleep(1* time.Second)
+            sleepCount += 1
+            if _, err := os.Stat(sociAddress); err == nil {
+                loopExit = true
+            }
+            if sleepCount > 10 {
+                return nil, errors.New("Could not create .sock in time")
+            }
+        }
+        
 	return &SociProcess{
 		command: sociCmd,
 		address: sociAddress,
@@ -98,7 +114,7 @@ func (proc *SociProcess) StopProcess() {
 	}
         err := os.RemoveAll(proc.address)
         if err != nil {
-            fmt.Println(err)
+            fmt.Printf("Error removing Address: %v\n", err)
         }
 }
 
@@ -106,19 +122,8 @@ func (proc *SociContainerdProcess) SociRPullImageFromECR(
 	imageRef string,
 	sociIndexDigest string,
 	awsSecretFile string) (containerd.Image, error) {
-	h := images.HandlerFunc(
-		func(ctx context.Context, desc ocispec.Descriptor) ([]ocispec.Descriptor, error) {
-			if desc.MediaType != images.MediaTypeDockerSchema1Manifest {
-				fmt.Printf("fetching %v... %v\n", desc.Digest.String()[:15], desc.MediaType)
-			}
-			return nil, nil
-		})
-
-	labels := commands.LabelArgs([]string{})
 	image, err := proc.Client.Pull(proc.Context, imageRef, []containerd.RemoteOpt{
-		containerd.WithPullLabels(labels),
 		containerd.WithResolver(framework.GetECRResolver(proc.Context, awsSecretFile)),
-		containerd.WithImageHandler(h),
 		containerd.WithSchema1Conversion,
 		containerd.WithPullUnpack,
 		containerd.WithPullSnapshotter("soci"),
@@ -127,7 +132,45 @@ func (proc *SociContainerdProcess) SociRPullImageFromECR(
 			sociIndexDigest)),
 	}...)
 	if err != nil {
+                fmt.Printf("Soci Pull Failed %v\n", err)
 		return nil, err
 	}
 	return image, nil
+}
+
+func (proc *SociContainerdProcess) SociRunImageFromECR(
+    image containerd.Image,
+    sociIndexDigest string) error {
+        id := fmt.Sprintf("%s-%d", sociContainerId, time.Now().UnixNano()) 
+	container, err := proc.Client.NewContainer(
+		proc.Context,
+		id,
+                containerd.WithSnapshotter("soci"),
+		containerd.WithNewSnapshot(id, image),
+		containerd.WithNewSpec(oci.WithImageConfig(image)))
+	if err != nil {
+		return err
+	}
+	defer container.Delete(proc.Context, containerd.WithSnapshotCleanup)
+	
+        task, err := container.NewTask(proc.Context, cio.NewCreator(cio.WithStdio))
+	if err != nil {
+		return err
+	}
+	defer task.Delete(proc.Context)
+
+	exitStatusC, err := task.Wait(proc.Context)
+	if err != nil {
+		return err
+	}
+
+	if err := task.Start(proc.Context); err != nil {
+		return err
+	}
+	status := <-exitStatusC
+	_, _, err = status.Result()
+	if err != nil {
+		return err
+	}
+	return nil
 }

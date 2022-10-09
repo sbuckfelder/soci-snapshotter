@@ -17,7 +17,10 @@
 package framework
 
 import (
+        "bufio"
 	"context"
+        "fmt"
+        "io"
         "io/fs"
 	"os"
 	"os/exec"
@@ -139,8 +142,16 @@ func (proc *ContainerdProcess) RunContainer(image containerd.Image) error {
 		return err
 	}
 	defer container.Delete(proc.Context, containerd.WithSnapshotCleanup)
-
-	task, err := container.NewTask(proc.Context, cio.NewCreator(cio.WithStdio))
+        
+        pipeReader, pipeWriter := io.Pipe()
+        scanner := bufio.NewScanner(pipeReader)
+        go func() {
+            for scanner.Scan() {
+                fmt.Printf("FromScanner: %s\n" , scanner.Text())
+            }
+        }()
+        cioCreator := cio.NewCreator(cio.WithStreams(os.Stdin, pipeWriter, os.Stderr))
+	task, err := container.NewTask(proc.Context, cioCreator)
 	if err != nil {
 		return err
 	}

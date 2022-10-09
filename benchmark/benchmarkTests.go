@@ -113,11 +113,39 @@ func BenchmarkSociRPullPullImage(
 		b.Fatal(err)
 	}
 	defer sociProcess.StopProcess()
-	b.ResetTimer()
 	sociContainerdProc := SociContainerdProcess{containerdProcess}
+	b.ResetTimer()
 	_, err = sociContainerdProc.SociRPullImageFromECR(imageRef, indexDigest, awsSecretFile)
 	if err != nil {
 		fmt.Println(err)
+		b.Fatal(err)
+	}
+	b.StopTimer()
+}
+
+func BenchmarkSociRunContainer(b *testing.B, imageRef string, indexDigest string) {
+	containerdProcess, err := getContainerdProcess(b) 
+	if err != nil {
+                fmt.Printf("Error Starting Containerd: %v\n", err)
+		b.Fatal(err)
+	}
+	defer containerdProcess.StopProcess()
+	sociProcess, err := getSociProcess(b)	
+        if err != nil {
+                fmt.Printf("Failed to create soci proc: %v\n", err)
+		b.Fatal(err)
+	}
+	defer sociProcess.StopProcess()
+	sociContainerdProc := SociContainerdProcess{containerdProcess}
+        image, err := sociContainerdProc.SociRPullImageFromECR(imageRef, indexDigest, awsSecretFile)
+        if err != nil {
+                fmt.Printf("Error Pulling Image: %v\n", err)
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	err = sociContainerdProc.SociRunImageFromECR(image, indexDigest)
+	if err != nil {
+                fmt.Printf("Error Running Container: %v\n", err)
 		b.Fatal(err)
 	}
 	b.StopTimer()
@@ -139,5 +167,6 @@ func getSociProcess(b *testing.B) (*SociProcess, error) {
 		sociAddress,
 		sociRoot,
 		containerdAddress,
+                sociConfig,
 		outputDir)
             }

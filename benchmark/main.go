@@ -35,6 +35,7 @@ var (
         sociBinary = "../out/soci-snapshotter-grpc"
         sociAddress = "/tmp/soci-snapshotter-grpc/soci-snapshotter-grpc.sock"
         sociRoot = "/tmp/lib/soci-snapshotter-grpc"
+        sociConfig = "./soci_config.toml"
         awsSecretFile = "./aws_secret"
 )
 
@@ -54,6 +55,7 @@ func main() {
 	}
 	var drivers []framework.BenchmarkTestDriver
 	for _, image := range imageList {
+/*
 		drivers = append(drivers, framework.BenchmarkTestDriver{
 			TestName:      "OverlayFSPull" + image.shortName,
 			NumberOfTests: 5,
@@ -61,19 +63,27 @@ func main() {
 				BenchmarkPullImageFromECR(b, image.imageRef)
 			},
 		})
-/*
+*/
 		drivers = append(drivers, framework.BenchmarkTestDriver{
 			TestName:      "OverlayFSRun" + image.shortName,
-			NumberOfTests: 10,
+			NumberOfTests: 5,
 			TestFunction: func(b *testing.B) {
 				BenchmarkRunContainerFromECR(b, image.imageRef)
 			},
 		})
+/*
 		drivers = append(drivers, framework.BenchmarkTestDriver{
 			TestName:      "SociRPull" + image.shortName,
-			NumberOfTests: 10,
+			NumberOfTests: 5,
 			TestFunction: func(b *testing.B) {
 				BenchmarkSociRPullPullImage(b, image.imageRef, image.sociIndexManifestRef)
+			},
+		})
+		drivers = append(drivers, framework.BenchmarkTestDriver{
+			TestName:      "SociRun" + image.shortName,
+			NumberOfTests: 5,
+			TestFunction: func(b *testing.B) {
+				BenchmarkSociRunContainer(b, image.imageRef, image.sociIndexManifestRef)
 			},
 		})
 */

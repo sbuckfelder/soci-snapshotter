@@ -26,6 +26,7 @@ GO_LD_FLAGS=-ldflags '-s -w -X $(PKG)/version.Version=$(VERSION) -X $(PKG)/versi
 SOCI_SNAPSHOTTER_PROJECT_ROOT ?= $(shell pwd)
 LTAG_TEMPLATE_FLAG=-t ./.headers
 FBS_FILE_PATH=$(CURDIR)/soci/fbs/ztoc.fbs
+COMMIT=$(shell git rev-parse HEAD)
 
 CMD=soci-snapshotter-grpc soci
 
@@ -129,3 +130,7 @@ integration:
 	@echo "$@"
 	@echo "SOCI_SNAPSHOTTER_PROJECT_ROOT=$(SOCI_SNAPSHOTTER_PROJECT_ROOT)"
 	@GO111MODULE=$(GO111MODULE_VALUE) SOCI_SNAPSHOTTER_PROJECT_ROOT=$(SOCI_SNAPSHOTTER_PROJECT_ROOT) ENABLE_INTEGRATION_TEST=true go test $(GO_TEST_FLAGS) -v -timeout=0 ./integration
+
+benchmarks:
+	@echo "$@"
+	@cd benchmark/ ; GO111MODULE=$(GO111MODULE_VALUE) go build -o bin/benchmarkTests . && sudo ./bin/benchmarkTests $(COMMIT) imagesToRun.csv

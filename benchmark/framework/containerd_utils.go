@@ -53,7 +53,6 @@ type ContainerdProcess struct {
 }
 
 func StartContainerd(
-	b *testing.B,
 	containerdAddress string,
 	containerdRoot string,
 	containerdState string,
@@ -86,7 +85,7 @@ func StartContainerd(
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancelCtx := testContext(b)
+	ctx, cancelCtx := GetTestContext() 
 
 	return &ContainerdProcess{
 		command:       containerdCmd,
@@ -187,6 +186,12 @@ func testContext(t testing.TB) (context.Context, context.CancelFunc) {
 	if t != nil {
 		ctx = logtest.WithT(ctx, t)
 	}
+	return ctx, cancel
+}
+
+func GetTestContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = namespaces.WithNamespace(ctx, testNamespace)
 	return ctx, cancel
 }
 

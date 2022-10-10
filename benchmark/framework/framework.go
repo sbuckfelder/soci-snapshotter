@@ -41,9 +41,11 @@ type BenchmarkFramework struct {
 type BenchmarkTestDriver struct {
 	TestName      string           `json:"testName"`
 	NumberOfTests int              `json:"numberOfTests"`
+	BeforeFunction  func() `json:"-"`
 	TestFunction  func(*testing.B) `json:"-"`
+	AfterFunction  func() `json:"-"`
 	TestsRun      int              `json:"testsRun"`
-	TestTimes     []float64        `json:"-"`
+	TestTimes     []float64        `json:"testTimes"`
 	StdDev        float64          `json:"stdDev"`
 	Mean          float64          `json:"mean"`
 	Min           float64          `json:"min"`
@@ -61,11 +63,17 @@ func (frame *BenchmarkFramework) Run() {
 	for i := 0; i < len(frame.Drivers); i++ {
 		testDriver := &frame.Drivers[i]
 		fmt.Printf("Running tests for %s\n", testDriver.TestName)
+                if testDriver.BeforeFunction != nil {
+                    testDriver.BeforeFunction()
+                }
 		for j := 0; j < testDriver.NumberOfTests; j++ {
 			res := testing.Benchmark(testDriver.TestFunction)
 			testDriver.TestTimes = append(testDriver.TestTimes, res.T.Seconds())
 		}
 		testDriver.calculateStats()
+                if testDriver.AfterFunction != nil {
+                    testDriver.AfterFunction()
+                }
 	}
 
 	json, err := json.MarshalIndent(frame, "", " ")

@@ -55,7 +55,6 @@ func main() {
 	}
 	var drivers []framework.BenchmarkTestDriver
 	for _, image := range imageList {
-/*
 		drivers = append(drivers, framework.BenchmarkTestDriver{
 			TestName:      "OverlayFSPull" + image.shortName,
 			NumberOfTests: 5,
@@ -63,15 +62,7 @@ func main() {
 				BenchmarkPullImageFromECR(b, image.imageRef)
 			},
 		})
-*/
-		drivers = append(drivers, framework.BenchmarkTestDriver{
-			TestName:      "OverlayFSRun" + image.shortName,
-			NumberOfTests: 5,
-			TestFunction: func(b *testing.B) {
-				BenchmarkRunContainerFromECR(b, image.imageRef)
-			},
-		})
-/*
+		drivers = append(drivers, GetRunContainerFromECRTestDriver(image, 5))
 		drivers = append(drivers, framework.BenchmarkTestDriver{
 			TestName:      "SociRPull" + image.shortName,
 			NumberOfTests: 5,
@@ -86,7 +77,6 @@ func main() {
 				BenchmarkSociRunContainer(b, image.imageRef, image.sociIndexManifestRef)
 			},
 		})
-*/
 	}
 
 	benchmarks := framework.BenchmarkFramework{

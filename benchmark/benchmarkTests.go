@@ -21,10 +21,11 @@ import (
 	"testing"
 
 	"github.com/awslabs/soci-snapshotter/benchmark/framework"
+	"github.com/containerd/containerd"
 )
 
 func BenchmarkPullImage(b *testing.B, imageRef string) {
-	containerdProcess, err := getContainerdProcess(b) 
+	containerdProcess, err := getContainerdProcess() 
 	if err != nil {
                 fmt.Printf("Error Starting Containerd: %v\n", err)
 		b.Fatal(err)
@@ -40,7 +41,7 @@ func BenchmarkPullImage(b *testing.B, imageRef string) {
 }
 
 func BenchmarkRunContainer(b *testing.B, imageRef string) {
-	containerdProcess, err := getContainerdProcess(b) 
+	containerdProcess, err := getContainerdProcess() 
 	if err != nil {
                 fmt.Printf("Error Starting Containerd: %v\n", err)
 		b.Fatal(err)
@@ -61,7 +62,7 @@ func BenchmarkRunContainer(b *testing.B, imageRef string) {
 }
 
 func BenchmarkPullImageFromECR(b *testing.B, imageRef string) {
-	containerdProcess, err := getContainerdProcess(b) 
+	containerdProcess, err := getContainerdProcess() 
 	if err != nil {
                 fmt.Printf("Error Starting Containerd: %v\n", err)
 		b.Fatal(err)
@@ -77,7 +78,7 @@ func BenchmarkPullImageFromECR(b *testing.B, imageRef string) {
 }
 
 func BenchmarkRunContainerFromECR(b *testing.B, imageRef string) {
-	containerdProcess, err := getContainerdProcess(b) 
+	containerdProcess, err := getContainerdProcess() 
 	if err != nil {
                 fmt.Printf("Error Starting Containerd: %v\n", err)
 		b.Fatal(err)
@@ -101,7 +102,7 @@ func BenchmarkSociRPullPullImage(
 	b *testing.B,
 	imageRef string,
 	indexDigest string) {
-	containerdProcess, err := getContainerdProcess(b) 
+	containerdProcess, err := getContainerdProcess() 
 	if err != nil {
                 fmt.Printf("Failed to create containerd proc: %v\n", err)
 		b.Fatal(err)
@@ -124,7 +125,7 @@ func BenchmarkSociRPullPullImage(
 }
 
 func BenchmarkSociRunContainer(b *testing.B, imageRef string, indexDigest string) {
-	containerdProcess, err := getContainerdProcess(b) 
+	containerdProcess, err := getContainerdProcess() 
 	if err != nil {
                 fmt.Printf("Error Starting Containerd: %v\n", err)
 		b.Fatal(err)
@@ -151,9 +152,8 @@ func BenchmarkSociRunContainer(b *testing.B, imageRef string, indexDigest string
 	b.StopTimer()
 }
 
-func getContainerdProcess(b *testing.B) (*framework.ContainerdProcess, error) {
+func getContainerdProcess() (*framework.ContainerdProcess, error) {
 	return framework.StartContainerd(
-		b,
 		containerdAddress,
 		containerdRoot,
 		containerdState,
@@ -170,3 +170,57 @@ func getSociProcess(b *testing.B) (*SociProcess, error) {
                 sociConfig,
 		outputDir)
             }
+
+func BeforeRunContainerFromECR(
+    imageRef string, 
+    containerdProcess **framework.ContainerdProcess, 
+    imagePtr **containerd.Image) {
+	proc, err := getContainerdProcess() 
+	*containerdProcess = proc 
+	if err != nil {
+                fmt.Printf("Error Starting Containerd: %v\n", err)
+	}
+        image, err := proc.PullImageFromECR(imageRef, platform, awsSecretFile)
+        *imagePtr = &image
+        if err != nil {
+                fmt.Printf("Error Pulling Image: %v\n", err)
+	}
+        return 
+}
+
+func BenchmarkRunContainerFromECRTesting(
+    b *testing.B,
+    containerdProcess *framework.ContainerdProcess, 
+    image *containerd.Image) {
+        b.ResetTimer()
+        err := containerdProcess.RunContainer(*image)
+	if err != nil {
+                fmt.Printf("Error Running Container: %v\n", err)
+		b.Fatal(err)
+	}
+        b.StopTimer()
+}
+
+func AfterRunContainerFromECRTesting(containerdProcess *framework.ContainerdProcess) { 
+    containerdProcess.StopProcess()
+}
+
+func GetRunContainerFromECRTestDriver(
+    desc ImageDescriptor, 
+    numTests int) framework.BenchmarkTestDriver { 
+    var proc *framework.ContainerdProcess 
+    var image *containerd.Image 
+    return framework.BenchmarkTestDriver{
+	    TestName:      "OverlayFSRun" + desc.shortName,
+	    NumberOfTests: numTests,
+            BeforeFunction: func() {
+                BeforeRunContainerFromECR(desc.imageRef, &proc, &image)
+            },
+	    TestFunction: func(b *testing.B) {
+		    BenchmarkRunContainerFromECRTesting(b, proc, image)
+	    },
+            AfterFunction: func() {
+                    AfterRunContainerFromECRTesting(proc)
+            },
+        }
+}

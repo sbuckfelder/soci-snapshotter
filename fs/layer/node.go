@@ -149,6 +149,8 @@ type node struct {
 	attr       metadata.Attr
 	ents       []fuse.DirEntry
 	entsCached bool
+	xattrCache []byte
+	xattrMiss  bool
 }
 
 func (n *node) logOperation(ctx context.Context, operationName string) {
@@ -369,24 +371,45 @@ var _ = (fusefs.NodeGetxattrer)((*node)(nil))
 
 func (n *node) Getxattr(ctx context.Context, attr string, dest []byte) (uint32, syscall.Errno) {
 	n.logOperation(ctx, "Getxattr")
+	if n.xattrMiss {
+		return 0, syscall.ENODATA
+	}
+
+	if n.xattrCache == nil {
+		n.xattrCache = n.cachexattr(attr)
+	}
+
+	if n.xattrMiss {
+		return 0, syscall.ENODATA
+	}
+
+	if len(dest) < len(n.xattrCache) {
+		return uint32(len(n.xattrCache)), syscall.ERANGE
+	}
+
+	return uint32(copy(dest, n.xattrCache)), 0
+}
+
+func (n *node) cachexattr(attr string) []byte {
 	ent := n.attr
 	opq := n.isOpaque()
-	for _, opaqueXattr := range n.fs.opaqueXattrs {
-		if attr == opaqueXattr && opq {
-			// This node is an opaque directory so give overlayfs-compliant indicator.
-			if len(dest) < len(opaqueXattrValue) {
-				return uint32(len(opaqueXattrValue)), syscall.ERANGE
+
+	if opq {
+		for _, opaqueXattr := range n.fs.opaqueXattrs {
+			if attr == opaqueXattr {
+				n.xattrMiss = false
+				return []byte(opaqueXattrValue)
 			}
-			return uint32(copy(dest, opaqueXattrValue)), 0
 		}
 	}
+
 	if v, ok := ent.Xattrs[attr]; ok {
-		if len(dest) < len(v) {
-			return uint32(len(v)), syscall.ERANGE
-		}
-		return uint32(copy(dest, v)), 0
+		n.xattrMiss = false
+		return v
 	}
-	return 0, syscall.ENODATA
+
+	n.xattrMiss = true
+	return nil
 }
 
 var _ = (fusefs.NodeListxattrer)((*node)(nil))
